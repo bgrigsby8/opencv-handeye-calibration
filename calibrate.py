@@ -40,7 +40,7 @@ for joint_set in JOINT_POSITIONS_RAD:
 
 # Chessboard pattern configuration
 PATTERN_SIZE = (9, 6)  # (width, height) in corners
-SQUARE_SIZE_M = 0.025  # 25mm squares
+SQUARE_SIZE_M = 0.021 # 21mm squares
 
 MIN_SAMPLES = 5
 # -----------------
@@ -57,12 +57,21 @@ async def get_camera_intrinsics(camera: Camera) -> tuple:
         [0, 0, 1]
     ], dtype=np.float32)
     
-    # Assuming no distortion for now - you may need to get these from camera
-    dist = properties.distortion_parameters
+    # These are values from viam's do command
+    dist = np.array([
+        0.11473497003316879,    # k1 - radial distortion
+        -0.31621694564819336,  # k2 - radial distortion  
+        0.00024490756914019585,    # p1 - tangential distortion
+        -0.0002616790879983455,    # p2 - tangential distortion
+        0.2385278344154358     # k3 - radial distortion
+    ], dtype=np.float32)
+    
+    print(f"Camera intrinsics: K shape={K.shape}, dist shape={dist.shape}")
+    print(f"Distortion coefficients: {dist}")
     
     return K, dist
 
-def call_go_orientation_converter(ox: float, oy: float, oz: float, theta: float) -> np.ndarray:
+def call_go_ov2mat(ox: float, oy: float, oz: float, theta: float) -> np.ndarray:
     """
     Call Go script to convert Viam orientation vector to rotation matrix
     
@@ -94,6 +103,43 @@ def call_go_orientation_converter(ox: float, oy: float, oz: float, theta: float)
         
     except Exception as e:
         print(f"Failed to call Go orientation converter: {e}")
+        return None
+    
+def call_go_mat2ov(R: np.ndarray) -> tuple:
+    """
+    Call Go script to convert rotation matrix to Viam orientation vector
+    
+    Args:
+        R: 3x3 rotation matrix as numpy array
+        
+    Returns:
+        (ox, oy, oz, theta): Orientation vector components, or None if failed
+    """
+    try:
+        # Flatten the rotation matrix to get 9 elements
+        flat_matrix = R.flatten()
+        matrix_args = [str(val) for val in flat_matrix]
+        
+        # Call Go script with mat2ov command and 9 matrix elements
+        result = subprocess.run([
+            'go', 'run', 'main.go', 'mat2ov'
+        ] + matrix_args, capture_output=True, text=True, cwd='./orientation_converter')
+        
+        if result.returncode != 0:
+            print(f"Go script error: {result.stderr}")
+            return None
+            
+        # Parse the 4 values returned by Go script (ox, oy, oz, theta)
+        values = [float(x) for x in result.stdout.strip().split()]
+        if len(values) != 4:
+            print(f"Expected 4 values from Go script, got {len(values)}")
+            return None
+            
+        # Return orientation vector components
+        return values[0], values[1], values[2], values[3]
+        
+    except Exception as e:
+        print(f"Failed to call Go mat2ov converter: {e}")
         return None
 
 def detect_chessboard_pose(image: np.ndarray, K: np.ndarray, dist: np.ndarray) -> tuple:
@@ -239,7 +285,7 @@ async def main():
             print(f"Arm orientation: ({arm_pose.o_x:.3f}, {arm_pose.o_y:.3f}, {arm_pose.o_z:.3f}, {arm_pose.theta:.3f})")
             
             # Convert orientation vector to rotation matrix using Go script
-            R_g2b = call_go_orientation_converter(arm_pose.o_x, arm_pose.o_y, arm_pose.o_z, arm_pose.theta)
+            R_g2b = call_go_ov2mat(arm_pose.o_x, arm_pose.o_y, arm_pose.o_z, arm_pose.theta)
             if R_g2b is None:
                 print("Failed to convert arm orientation, skipping pose")
                 continue
@@ -264,6 +310,10 @@ async def main():
             print(f"Target position in camera frame: {t_t2c.flatten()} mm")
             
             # Store the pose pair
+            print(f"Arm R: {R_g2b}")
+            print(f"Arm t: {t_g2b}")
+            print(f"Tag R: {R_t2c}")
+            print(f"Tag t: {t_t2c}")
             R_gripper2base_list.append(R_g2b)
             t_gripper2base_list.append(t_g2b)
             R_target2cam_list.append(R_t2c)
@@ -292,6 +342,15 @@ async def main():
         if R_cam2gripper is not None:
             print(f"Camera to gripper rotation matrix:\n{R_cam2gripper}")
             print(f"Camera to gripper translation: {t_cam2gripper.flatten()} mm")
+            
+            # Convert final rotation matrix back to orientation vector
+            final_ov = call_go_mat2ov(R_cam2gripper)
+            if final_ov is not None:
+                ox, oy, oz, theta = final_ov
+                print(f"Camera to gripper orientation vector: ({ox:.6f}, {oy:.6f}, {oz:.6f}, {theta:.6f})")
+                print(f"Theta in degrees: {np.degrees(theta):.3f}°")
+            else:
+                print("Failed to convert rotation matrix to orientation vector")
             
             # Save final calibration result
             result = {
