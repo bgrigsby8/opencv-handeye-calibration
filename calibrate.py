@@ -84,7 +84,7 @@ def call_go_ov2mat(ox: float, oy: float, oz: float, theta: float) -> np.ndarray:
     try:
         # Call Go script with orientation vector parameters
         result = subprocess.run([
-            'go', 'run', 'main.go',
+            'go', 'run', 'main.go', 'ov2mat',
             str(ox), str(oy), str(oz), str(theta)
         ], capture_output=True, text=True, cwd='./orientation_converter')
         
