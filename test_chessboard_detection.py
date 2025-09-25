@@ -12,7 +12,7 @@ import sys
 
 
 # Chessboard pattern configuration (matching your calibrate.py)
-PATTERN_SIZE = (10, 7)  # (width, height) in corners
+PATTERN_SIZE = (9, 6)  # (width, height) in corners
 SQUARE_SIZE_M = 0.025  # 25mm squares
 
 

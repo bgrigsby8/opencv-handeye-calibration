@@ -39,7 +39,7 @@ for joint_set in JOINT_POSITIONS_RAD:
     JOINT_POSITIONS.append(degrees_set)
 
 # Chessboard pattern configuration
-PATTERN_SIZE = (10, 7)  # (width, height) in corners
+PATTERN_SIZE = (9, 6)  # (width, height) in corners
 SQUARE_SIZE_M = 0.025  # 25mm squares
 
 MIN_SAMPLES = 5
